@@ -24,7 +24,8 @@ from torchvision.datasets.folder import default_loader
 
 import timm
 
-assert timm.__version__ == "0.3.2"  
+# 尝试 0.4.12版本
+# assert timm.__version__ == "0.3.2"  
 import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
@@ -95,6 +96,11 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda', help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+
+    parser.add_argument('--resume_different_size', default='',
+                    help='continue to pretrain for different size')
+
+
     parser.add_argument('--load_from', default='', help='load pretrained checkpoint model')
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='start epoch')
@@ -128,11 +134,33 @@ def main(args):
 
     cudnn.benchmark = True
 
-    transform_train = MaskTransform(args)
+    # transform_train = MaskTransform(args)
     # TODO modify your own data loader here
-    train_folder = os.path.join(args.data_path, 'train')
-    train_ann_file = os.path.join(args.data_path, 'train.txt')
-    dataset_train = ImageListFolder(train_folder, transform=transform_train, ann_file=train_ann_file)
+    # train_folder = os.path.join(args.data_path, 'train')
+    # train_ann_file = os.path.join(args.data_path, 'train.txt')
+    # dataset_train = ImageListFolder(train_folder, transform=transform_train, ann_file=train_ann_file)
+    # print(dataset_train)
+
+
+    # 尝试替换为高光谱数据
+    root_dir = '/mnt/data3/data_fjq/hyspecnet-11k'
+    from mask_transform import MaskTransform, RandomMaskingGenerator
+    class MaskTransform_my(MaskTransform):
+        def __init__(self, input_size, token_size, mask_ratio, mask_regular=False):
+            self.transform = transforms.Compose([
+                transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip()])# 添加垂直翻转
+
+            self.masked_position_generator = RandomMaskingGenerator(
+                token_size, mask_ratio, mask_regular
+            )
+
+    # input_size 128
+    # token_size 128/16  = input_size/ stride
+    transform_train_my = MaskTransform_my(input_size=args.input_size, token_size=int(args.input_size//16), mask_ratio=0.75, mask_regular=True)
+    from util.datasets import HySpecNet11k
+    dataset_train = HySpecNet11k(root_dir, transform = transform_train_my, mode='easy', split='train', saved_bands_num=[24,48])
     print(dataset_train)
 
     if True:  # args.distributed:
@@ -173,6 +201,31 @@ def main(args):
     else:
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,
                                                 vis_mask_ratio=args.vis_mask_ratio)
+
+
+    if args.resume_different_size:
+        # TODO: 这里加载swin——large预训练模型摸高
+        checkpoint = torch.load(args.resume_different_size, map_location='cpu')
+
+        print("Load pre-trained_size checkpoint from: %s" % args.resume_different_size)
+        checkpoint_model = checkpoint['model']
+        state_dict = model.state_dict()
+        for k in ['pos_embed_spatial', 'pos_embed', 'decoder_pos_embed', 'patch_embed.proj.weight',
+                  'decoder_pos_embed_spatial', 'patch_embed.proj.bias', 'head.weight', 'head.bias',
+                  # 光谱维度增加重新初始化位置编码
+                  'pos_embed_temporal','decoder_pos_embed_temporal'
+                  ]:
+            # for k in ['pos_embed', 'decoder_pos_embed', 'patch_embed.proj.weight',
+            #                'patch_embed.proj.bias', 'head.weight', 'head.bias']:
+            if k in checkpoint['model'] and checkpoint['model'][k].shape != state_dict[k].shape:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint['model'][k]
+        
+        # interpolate position embedding
+        # interpolate_pos_embed(model, checkpoint['model'])
+        msg = model.load_state_dict(checkpoint_model, strict=False)
+        print(msg)
+
 
     model.to(device)
 

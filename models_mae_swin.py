@@ -358,7 +358,8 @@ class MaskedAutoencoderSwin(nn.Module):
         self.decoder_pos_embed = nn.Parameter(torch.zeros(1, self.decoder_num_patches, decoder_embed_dim), requires_grad=False)  
 
         self.decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            # Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
@@ -416,6 +417,20 @@ class MaskedAutoencoderSwin(nn.Module):
         x = torch.einsum('nhwpqc->nchpwq', x)
         imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
         return imgs
+    
+    def unpatchify_72(self, x, stride=16):
+        """
+        x: (N, L, patch_size**2 *3)
+        imgs: (N, 3, H, W)
+        """
+        p = stride
+        h = w = int(x.shape[1]**.5)
+        assert h * w == x.shape[1]
+        
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, 72))
+        x = torch.einsum('nhwpqc->nchpwq', x)
+        imgs = x.reshape(shape=(x.shape[0], 72, h * p, h * p))
+        return imgs
 
     def patchify(self, imgs, stride=16):
         """
@@ -430,6 +445,21 @@ class MaskedAutoencoderSwin(nn.Module):
         x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
         x = torch.einsum('nchpwq->nhwpqc', x)
         x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 3))
+        return x
+    
+    def patchify_72(self, imgs, stride=16):
+        """
+        imgs: (N, 72, H, W)
+        x: (N, L, patch_size**2 *3)
+        """
+        # p = self.patch_embed.patch_size[0]
+        p = stride
+        assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
+
+        h = w = imgs.shape[2] // p
+        x = imgs.reshape(shape=(imgs.shape[0], 72, h, p, w, p))
+        x = torch.einsum('nchpwq->nhwpqc', x)
+        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 72))
         return x
 
     def forward_encoder(self, x, mask):
@@ -529,7 +559,8 @@ class MaskedAutoencoderSwin(nn.Module):
         pred: [N, mask, p*p*3] 
         mask: [N, L], 0 is keep, 1 is remove, 
         """
-        target = self.patchify(imgs, self.stride)
+        # target = self.patchify(imgs, self.stride)
+        target = self.patchify_72(imgs, self.stride)
         N, _, D = target.shape
         target = target[mask].reshape(N, -1, D)
         if self.norm_pix_loss:
@@ -551,6 +582,16 @@ class MaskedAutoencoderSwin(nn.Module):
 def mae_swin_tiny_256_dec512d2b(**kwargs):
     model = MaskedAutoencoderSwin(
         img_size=256, patch_size=4, in_chans=3, stride=16,
+        embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
+        mlp_ratio=4, window_size=8, # 16 for finetune
+        decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+# 增加一个128的
+def mae_swin_tiny_128(**kwargs):
+    model = MaskedAutoencoderSwin(
+        img_size=128, patch_size=4, in_chans=72, stride=16,
         embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
         mlp_ratio=4, window_size=8, # 16 for finetune
         decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
