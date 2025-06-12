@@ -599,6 +599,15 @@ def mae_swin_tiny_128(**kwargs):
     return model
 
 
+def mae_swin_large_128(**kwargs):
+    model = MaskedAutoencoderSwin(
+        img_size=128, patch_size=4, in_chans=72, stride=16,
+        embed_dim=192, depths=[2, 2, 18, 2], num_heads=[6, 12, 24, 48],
+        posmlp_dim=64, mlp_ratio=4, window_size=8, # 16 for finetune
+        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
 def mae_swin_large_256_dec512d2b(**kwargs):
     model = MaskedAutoencoderSwin(
         img_size=256, patch_size=4, in_chans=3, stride=16,

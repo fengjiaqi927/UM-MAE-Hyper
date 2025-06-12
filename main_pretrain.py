@@ -210,13 +210,8 @@ def main(args):
         print("Load pre-trained_size checkpoint from: %s" % args.resume_different_size)
         checkpoint_model = checkpoint['model']
         state_dict = model.state_dict()
-        for k in ['pos_embed_spatial', 'pos_embed', 'decoder_pos_embed', 'patch_embed.proj.weight',
-                  'decoder_pos_embed_spatial', 'patch_embed.proj.bias', 'head.weight', 'head.bias',
-                  # 光谱维度增加重新初始化位置编码
-                  'pos_embed_temporal','decoder_pos_embed_temporal'
-                  ]:
-            # for k in ['pos_embed', 'decoder_pos_embed', 'patch_embed.proj.weight',
-            #                'patch_embed.proj.bias', 'head.weight', 'head.bias']:
+        for k in ['patch_embed.proj.weight']: # 原始： 96，3，4，4 改为 96，72，4，4
+            print(k)
             if k in checkpoint['model'] and checkpoint['model'][k].shape != state_dict[k].shape:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint['model'][k]
