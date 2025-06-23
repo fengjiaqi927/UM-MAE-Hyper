@@ -112,7 +112,7 @@ def get_args_parser():
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')
-    parser.add_argument('--local_rank', default=-1, type=int)
+    parser.add_argument('--local-rank', default=-1, type=int)
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
@@ -143,7 +143,8 @@ def main(args):
 
 
     # 尝试替换为高光谱数据
-    root_dir = '/mnt/data3/data_fjq/hyspecnet-11k'
+    # root_dir = '/mnt/data3/data_fjq/hyspecnet-11k'
+    root_dir = '/mnt/ali-sh-1/usr/qiming2/fengjq/hyspecnet-11k/20250525_data'
     from mask_transform import MaskTransform, RandomMaskingGenerator
     class MaskTransform_my(MaskTransform):
         def __init__(self, input_size, token_size, mask_ratio, mask_regular=False):

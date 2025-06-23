@@ -462,7 +462,7 @@ class MaskedAutoencoderSwin(nn.Module):
         x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 72))
         return x
 
-    def forward_encoder(self, x, mask):
+    def forward_encoder(self, x, mask, vis=False):
         N = x.size(0)
         # embed patches
         x = self.patch_embed(x)
@@ -523,7 +523,9 @@ class MaskedAutoencoderSwin(nn.Module):
         for blk in self.blocks:
             x, pos_hw = blk(x, pos_hw)
         x = self.norm(x)
-
+        
+        if vis:
+            return x,new_mask
         return x
 
     def forward_decoder(self, x, mask):
@@ -572,11 +574,19 @@ class MaskedAutoencoderSwin(nn.Module):
         loss = loss.mean()
         return loss
 
-    def forward(self, imgs, mask):
-        latent = self.forward_encoder(imgs, mask) # returned mask may change
-        pred, mask_num = self.forward_decoder(latent, mask)  # [N, L, p*p*3]
-        loss = self.forward_loss(imgs, pred[:, -mask_num:], mask)
-        return loss, pred, mask
+    def forward(self, imgs, mask, vis=False):
+        if vis:
+            latent, mask_vis = self.forward_encoder(imgs, mask, vis)
+            pred, mask_num = self.forward_decoder(latent, mask)  # [N, L, p*p*3]
+            loss = self.forward_loss(imgs, pred[:, -mask_num:], mask)
+            scale = int(imgs.shape[-1]/mask_vis.shape[-1])
+            mask_vis_expand = ~mask_vis.repeat_interleave(scale, 2).repeat_interleave(scale, 3).contiguous()
+            return loss, imgs*mask_vis_expand, self.unpatchify_72(pred, self.stride)
+        else:
+            latent = self.forward_encoder(imgs, mask) # returned mask may change
+            pred, mask_num = self.forward_decoder(latent, mask)  # [N, L, p*p*3]
+            loss = self.forward_loss(imgs, pred[:, -mask_num:], mask)
+            return loss, pred, mask
 
 
 def mae_swin_tiny_256_dec512d2b(**kwargs):
