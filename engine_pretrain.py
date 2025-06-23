@@ -46,6 +46,14 @@ def train_one_epoch(model: torch.nn.Module,
         samples = images.to(device, non_blocking=True)
         bool_masked_pos = bool_masked_pos.to(device, non_blocking=True).flatten(1).to(torch.bool)
 
+        # 环境依赖
+        import numpy as np
+        import cv2
+        import os
+        temp_path = args.log_dir + '/vis/'
+
+        if not os.path.exists(temp_path):
+            os.makedirs(temp_path)
         if args.bf16:
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                 loss, _, _ = model(samples, mask=bool_masked_pos)
@@ -55,12 +63,6 @@ def train_one_epoch(model: torch.nn.Module,
                 ## 增加可视化操作：
                 loss, imgs, pred = model(samples, mask=bool_masked_pos,vis=True)
                 ## 选取部分通道可视化
-                import numpy as np
-                import cv2
-                import os
-                temp_path = args.log_dir + '/vis/'
-                if not os.path.exists(temp_path):
-                    os.makedirs(temp_path)
                 img_rgb =  (np.transpose(imgs[0, [7,13,19], :, :].cpu().numpy(),(1, 2, 0))* 255).astype(np.uint8)
                 pred_rgb = (np.transpose(pred.squeeze(1)[0, [7,13,19], :, :].cpu().detach().numpy(),(1, 2, 0))* 255).astype(np.uint8)
                 img_rgb = np.sqrt(img_rgb / 255.0) * 255.0
