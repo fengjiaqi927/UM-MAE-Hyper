@@ -370,6 +370,8 @@ class MaskedAutoencoderSwin(nn.Module):
 
         self.initialize_weights()
 
+        self.my_avg_pool = nn.AvgPool2d(kernel_size=4, stride=4)
+
     def initialize_weights(self):
         # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
@@ -574,13 +576,72 @@ class MaskedAutoencoderSwin(nn.Module):
         loss = loss.mean()
         return loss
 
+    def spectral_angle_loss(self, pred, target):
+        """
+        计算两个张量之间的光谱角损失
+        
+        参数:
+        - pred: 形状为 [1, 72, 16, 16] 的预测张量
+        - target: 形状为 [1, 72, 16, 16] 的目标张量
+        
+        返回:
+        - 所有位置光谱角的总和
+        """
+        N,C,h,w = pred.shape
+        # 将张量重塑为[16*16, 72]形状，每行代表一个像素位置的光谱向量
+        pred_flat = pred.reshape(N, C, -1).permute(0, 2, 1).reshape(-1, C)
+        target_flat = target.reshape(N, C, -1).permute(0, 2, 1).reshape(-1, C)
+        
+        # 计算余弦相似度
+        cos_sim = torch.nn.functional.cosine_similarity(pred_flat, target_flat, dim=1)  # 形状为[256]
+        
+        # 裁剪余弦值到[-1, 1]范围内，避免数值不稳定
+        cos_sim = torch.clamp(cos_sim, -1.0 + 1e-7, 1.0 - 1e-7)
+        
+
+        # 求和得到总损失
+        loss = torch.sum(1-cos_sim)
+        
+        return loss
+
+    def new_forward_loss(self, imgs, pred, mask, mask_num, mask_vis_expand):
+
+        target = self.patchify_72(imgs, self.stride)
+        N, _, D = target.shape
+        target = target[mask].reshape(N, -1, D)
+        if self.norm_pix_loss:
+            mean = target.mean(dim=-1, keepdim=True)
+            var = target.var(dim=-1, keepdim=True)
+            target = (target - mean) / (var + 1.e-6)**.5 # (N, L, p*p*3)
+
+        loss1 = (pred[:, -mask_num:] - target) ** 2
+        loss1 = loss1.mean()
+
+        
+
+        pre_img = self.unpatchify_72(pred, self.stride)
+
+
+        pred_spectral = self.my_avg_pool(pre_img)
+        img_spectral = self.my_avg_pool(imgs)
+
+        loss2 = self.spectral_angle_loss(img_spectral,pred_spectral)
+
+
+        loss3 = (pre_img-imgs) ** 2
+        loss3 = (loss3*~mask_vis_expand).sum() / (~mask_vis_expand).sum()
+
+        return loss1 + 0.01*loss2 + loss3
+
     def forward(self, imgs, mask, vis=False):
         if vis:
             latent, mask_vis = self.forward_encoder(imgs, mask, vis)
             pred, mask_num = self.forward_decoder(latent, mask)  # [N, L, p*p*3]
-            loss = self.forward_loss(imgs, pred[:, -mask_num:], mask)
+            # loss = self.forward_loss(imgs, pred[:, -mask_num:], mask)
             scale = int(imgs.shape[-1]/mask_vis.shape[-1])
             mask_vis_expand = ~mask_vis.repeat_interleave(scale, 2).repeat_interleave(scale, 3).contiguous()
+            loss = self.new_forward_loss(imgs, pred, mask, mask_num, mask_vis_expand)
+
             return loss, imgs*mask_vis_expand, self.unpatchify_72(pred, self.stride)
         else:
             latent = self.forward_encoder(imgs, mask) # returned mask may change
